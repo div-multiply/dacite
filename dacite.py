@@ -200,11 +200,15 @@ def _make_inner_config(field: Field, config: Config) -> Config:
 def _inner_from_dict_for_dataclass(data_class: Type[T], data: Data, outer_config: Config, field: Field) -> T:
     if _is_instance(data_class, data):
         return data
-    return from_dict(
-        data_class=data_class,
-        data=data,
-        config=_make_inner_config(field, outer_config),
-    )
+    try:
+        return from_dict(
+            data_class=data_class,
+            data=data,
+            config=_make_inner_config(field, outer_config),
+        )
+    except MissingValueError:
+        return None
+
 
 
 def _inner_from_dict_for_collection(collection: Type[T], data: List[Data], outer_config: Config, field: Field) -> T:
@@ -232,7 +236,10 @@ def _extract_generic_collection(collection: Type) -> Type:
 
 
 def _inner_from_dict_for_union(data: Any, field: Field, outer_config: Config) -> Any:
+    values = []
+    item = 0
     for t in field.type.__args__:
+        item += 1
         try:
             if is_dataclass(t) and isinstance(data, dict):
                 return _inner_from_dict_for_dataclass(
@@ -242,6 +249,28 @@ def _inner_from_dict_for_union(data: Any, field: Field, outer_config: Config) ->
                     field=field,
                 )
             elif _is_data_class_collection(t) and _is_instance(t, data):
+                values.append(_inner_from_dict_for_collection(
+                    collection=t,
+                    data=data,
+                    outer_config=outer_config,
+                    field=field,
+                ))
+                if None in values[item - 1]:
+                    continue
+                output = []
+                output.append('placeholder')
+                loc = 0
+                for items in values:
+                    val_loc = 0
+                    for val in items:
+                            if val is not None and output[val_loc] == 'placeholder':
+                                output[loc] = val
+                                loc += 1
+                            output.append('placeholder')
+                            val_loc += 1
+                while 'placeholder' in output: output.remove('placeholder')
+                return output
+
                 return _inner_from_dict_for_collection(
                     collection=t,
                     data=data,
